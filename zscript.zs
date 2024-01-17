@@ -64,7 +64,7 @@ class UTP_Controller : Inventory
 
 	void HighlightPickup(Inventory pickup)
 	{
-		if (!pickup)
+		if (!pickup || !owner.CanTouchItem(pickup))
 		{
 			if (highlighter)
 			{
@@ -108,7 +108,7 @@ class UTP_Controller : Inventory
 			Vector3 view = Level.SphericalCoords(source.pos + (0,0,z), itm.pos + (0,0,itm.height * 0.5), (source.angle, source.pitch));
 			if (view.z > dist || (view.z > owner.radius * 2 && (abs(view.x) > PICKUPANGLE || abs(view.y) > PICKUPANGLE)))
 			{
-					continue;
+				continue;
 			}
 			double ang = min(view.x, view.y);
 			if (ang < closestAngle)
@@ -125,7 +125,7 @@ class UTP_PickupHighligtThinker : Thinker
 	Inventory pickup;
 	Inventory highlight;
 	Actor toucher;
-	bool isPicking;
+	int isPicking;
 	int age;
 
 	static UTP_PickupHighligtThinker Make(Inventory pickup, int playerNumber)
@@ -180,18 +180,43 @@ class UTP_PickupHighligtThinker : Thinker
 
 	bool DoPickup(Actor toucher)
 	{
-		if (!highlight || !pickup)
+		if (!highlight || !pickup || !toucher || !toucher.player)
 			return false;
 		
 		if (!pickup.CallTryPickup(toucher))
 			return false;
+		
+		let player = toucher.player;
 
-		pickup.PlayPickupSound(toucher);
-		pickup.PrintPickupMessage(true, pickup.PickupMessage());
+		// An extra null-check for pickup
+		// in case it was consumed by CallTryPickup:
+		if (pickup)
+		{
+			// Handle sound, pickupmessage and the rest,
+			// as if we called Touch():
+			if (!pickup.bQUIET)
+			{
+				pickup.PlayPickupSound(toucher);
+				pickup.PrintPickupMessage(true, pickup.PickupMessage());
+				if (!pickup.bNoScreenFlash && player.playerstate != PST_DEAD)
+				{
+					player.bonuscount = Inventory.BONUSADD;
+				}
+			}
+			pickup.DoPickupSpecial(toucher);
+			if (pickup.bCOUNTITEM)
+			{
+				player.itemcount++;
+			}
+			if (pickup.bCOUNTSECRET)
+			{
+				player.mo.GiveSecret(true, true);
+			}
+		}
 		highlight.A_SetRenderstyle(highlight.default.alpha, highlight.default.GetRenderstyle());
 		highlight.translation = highlight.default.translation;
 		self.toucher = toucher;
-		isPicking = true;
+		isPicking = 5;
 		return true;
 	}
 
@@ -206,13 +231,12 @@ class UTP_PickupHighligtThinker : Thinker
 		if (isPicking && toucher)
 		{
 			Vector3 vec = Level.Vec3Diff(highlight.pos, toucher.pos + (0,0,toucher.height*0.5));
-			double dist = vec.Length();
-			if (dist <= toucher.radius)
+			highlight.vel = vec.Unit() * 12;
+			isPicking--;
+			if (isPicking <= 0)
 			{
 				Destroy();
-				return;
 			}
-			highlight.vel = vec.Unit() * 12;
 			return;
 		}
 
